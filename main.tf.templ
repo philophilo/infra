@@ -1,0 +1,10 @@
+module "gke" {
+    source                      = "./gke"
+    project                     = "$(project)"
+    region                      = "$(region)"
+    zone                        = "$(zone)" 
+    environment                 = "$(environment)"
+    prefix                      = "$(prefix)"
+    credentials                 = "$(credentials)"
+    bucket                      = "$(bucket)"
+}
