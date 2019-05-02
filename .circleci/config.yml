@@ -1,0 +1,67 @@
+defaults: &defaults
+  docker:
+    - image: philophilo/cicd
+      auth:
+        username: ${DOCKER_USERNAME}
+        password: ${DOCKER_PASSWORD}
+
+set_workspace: &set_workspace
+  working_directory: ~/repo
+
+# configure and suthenticate gcloud
+gcloud_auth: &gcloud_auth
+  run:
+    name: setup gcloud
+    command: |
+      touch goocle-service-key.json
+      echo $GOOGLE_CREDENTIALS | base64 --decode >> google-service-key.json
+      gcloud auth activate-service-account --key-file google-service-key.json
+      gcloud --quiet config set project ${GOOGLE_PROJECT_ID}
+      gcloud --quiet config set compute/zone ${GOOGLE_COMPUTE_ZONE}
+
+# use circleci verison for the workflows
+version: 2
+jobs:
+  build_cicd_image:
+    <<: *defaults
+    <<: *set_workspace
+    steps:
+      - checkout
+      - *gcloud_auth
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - run:
+          name: check circleci base image
+          command: |
+            cd ~/repo/
+            if [ "$CIRCLECI_BRANCH" != master ]; then
+              # compare current commit against the previous commit
+              image=$(git diff-tree --no-commit-id --name-only -r HEAD | grep images/circleci/Dockerfile || true)
+              echo $image
+              # build image
+              if [[ ${image} == "images/circleci/Dockerfile" ]]; then
+                docker login -u "$(echo $DOCKER_USERNAME)" -p "$(echo $DOCKER_PASSWORD)" https://gcr.io
+                docker build -f images/circleci/Dockerfile -t philophilo/cicd .
+                docker push philophilo/cicd
+              else
+                echo "No change detected"
+              fi
+            else
+              # checkout to different branch to trigger git diff
+              git checkout develop && git checkout $CIRCLE_BRANCH
+              # compare the current revision against the previous
+              image=$(git diff HEAD@{1} images/circleci/Dockerfile | cat)
+              if [ -n "$image" ]; then
+                docker login -u _json_key -p "$(echo $GOOGLE_CREDENTIALS_STAGING | base64 --decode )" https://gcr.io
+                docker build -f images/circleci/Dockerfile -t ${CIRCLECI_IMAGE} .
+                docker push ${CIRCLECI_IMAGE}
+              else
+                echo "No change detected"
+              fi
+            fi
+
+workflows:
+  version: 2
+  build_and_deploy:
+    jobs:
+      - build_cicd_image
